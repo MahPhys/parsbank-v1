@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "apps/api/src/**/*.ts",
+    "apps/api/scripts/**/*.ts",
+    "apps/public/src/**/*.ts",
+    "apps/public/src/**/*.tsx",
+    "apps/admin/src/**/*.ts",
+    "apps/admin/src/**/*.tsx",
+    "tests/**/*.ts"
+  ]
+}
