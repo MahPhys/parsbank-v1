@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+
+# runtime data (embedded PostgreSQL data dir, uploaded media, logs)
+.data/
+*.log
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.tsbuildinfo

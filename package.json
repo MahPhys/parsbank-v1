@@ -1,0 +1,47 @@
+{
+  "name": "parsbank",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BANK PARS (بانک پارس) — a closed private monetary system: PRS currency, double-entry ledger, physical banknote registry, treasury policy and administrative control plane.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "tsx apps/api/scripts/migrate.ts",
+    "db:seed": "tsx apps/api/scripts/seed.ts",
+    "db:reset": "tsx apps/api/scripts/migrate.ts --fresh && tsx apps/api/scripts/seed.ts",
+    "api:dev": "tsx watch apps/api/src/server.ts",
+    "api:start": "tsx apps/api/src/server.ts",
+    "public:dev": "vite --config apps/public/vite.config.ts",
+    "admin:dev": "vite --config apps/admin/vite.config.ts",
+    "build": "npm run build:public && npm run build:admin",
+    "build:public": "vite build --config apps/public/vite.config.ts",
+    "build:admin": "vite build --config apps/admin/vite.config.ts",
+    "serve": "npm run db:migrate && tsx apps/api/src/server.ts",
+    "demo": "npm run build && npm run db:reset && npm run api:start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:acceptance": "vitest run tests/acceptance",
+    "audit:ledger": "tsx apps/api/scripts/audit-ledger.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.24.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

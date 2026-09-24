@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="بانک پارس">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1D4E9B" />
+      <stop offset="1" stop-color="#12233D" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)" />
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linejoin="round">
+    <path d="M32 12 52 22H12z" />
+    <path d="M18 26v16M27 26v16M37 26v16M46 26v16" />
+    <path d="M13 47h38" />
+  </g>
+  <path d="M32 12 4 25l28 14 28-14z" fill="none" stroke="#C62828" stroke-width="1.6" opacity="0.6" />
+</svg>
