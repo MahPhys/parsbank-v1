@@ -17,11 +17,12 @@
 | id | what | severity | status |
 |---|---|---|---|
 | A-1 | member send/QR path broken — API rejected its own wallet reference, 500 on malformed ids | critical | **fixed, verified live, regression test added** |
-| B-1 | RLS defined but never in force; service connects as schema owner | high | open |
-| B-2 | append-only history erasable with `TRUNCATE` | high | open |
-| B-3 | `system_settings`, wallet ownership and the balance cache are directly writable by SQL | high | open |
+| B-1 | RLS defined but never in force; service connects as schema owner | high | **forced + role + grants done**; per-request identity wiring is the remaining half |
+| B-2 | append-only history erasable with `TRUNCATE` | high | **fixed (0017), attack test added** |
+| B-3 | `system_settings`, wallet ownership and the balance cache are directly writable by SQL | high | **fixed (0017), attack test added** |
 | B-4 | admin routes guarded per-route, not fail-closed | high | open |
-| B-5 | first issuance with no eligible reserve fails on a raw constraint | high | open — **needs a policy decision** |
+| B-5 | first issuance with no eligible reserve fails on a raw constraint | high | decision made: **refuse the operation**; fix pending |
+| B-6 | `MAX_SUPPLY_CHANGE` could never execute (`42P18`, reported as 500) | high | **fixed, verified live end-to-end, test added** |
 | C-1 | design-token values interpolated into injected CSS | medium | open |
 | C-2 | preview frame-ancestor compiled in for all environments | medium | open |
 | C-3 | no dedicated rate limit on money endpoints | medium | open |
@@ -245,6 +246,32 @@ Option (b) is the more conservative reading of the reserve-backed model and is
 what the coverage floor (`min_coverage_ratio = 1.00`) already implies; option (a)
 keeps a papered-over rate in circulation. **This audit recommends (b)** and does
 not implement either until the choice is confirmed.
+
+### B-6 — A critical treasury operation could never execute, and failed as a 500
+**Status: FIXED and verified live end-to-end.**
+
+Found while testing the B-3 guard: the `MAX_SUPPLY_CHANGE` executor wrote its new
+ceiling with a statement that bound `$2` and `$3` but no `$1`:
+
+```sql
+UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = 'max_supply_minor'
+```
+
+PostgreSQL cannot infer the type of an unreferenced parameter, so every execution
+died with `42P18 could not determine data type of parameter $1`. A scan of every
+SQL string in `apps/api/src` and `db/migrations` found exactly this one instance
+(`tests/audit/param-binding.probe.ts` demonstrates both forms side by side).
+
+Two defects compounded it:
+- the API reported it as `500 INTERNAL_ERROR`, because `42P18` was unmapped;
+- `executeAdminAction`'s failure handler writes its `FAILED` bookkeeping through
+  `context.db` — a *different* connection under `pg`, but the *same* connection
+  under PGlite, so those statements ran inside the already-aborted transaction and
+  masked the original error with `25P02`. The real cause never reached the log.
+
+Verified live after the fix (officer requests → director approves → director
+executes): `max supply now 9500`, an immediate replay returns
+`APPROVAL_ALREADY_DECIDED`, and the audit trail carries both people.
 
 ---
 
@@ -472,7 +499,7 @@ guards, so the UI cannot advertise a section the API would refuse.
 | # | Group | Findings | Blocks acceptance tests | Risk if deferred |
 |---|---|---|---|---|
 | 0 | **Reserve-less pricing (B-5)** — needs the policy decision above | B-5 | 9, 10 | an issuance fails with a constraint name, or a rate is published that the reserve does not support |
-| 1 | Database authority | B-1, B-2, B-3, G3 | 1, 5, 13, 14 and the "no deleted transaction disappears" clause | cross-tenant read/write; historical erasure |
+| 1 | Database authority — **in progress**: 0017 shipped and attacked; per-request identity wiring still to do | B-1, B-2, B-3, G3 | 1, 5, 13, 14 and the "no deleted transaction disappears" clause | cross-tenant read/write; historical erasure |
 | 2 | Route default-deny + authz backstops | B-4, C-5 | 1, 5, 14 | a single unguarded future route opens the admin plane |
 | 3 | Injection & transport | C-1, C-2, D-2 | 15 | UI redressing today; script execution if CSP is relaxed |
 | 4 | Abuse control | C-3, C-4 | — | enumeration and authorization hoarding |
@@ -497,5 +524,29 @@ section I added alongside and the full suite re-run after each group.
   and a `SECURITY/WARNING` audit entry; migration
   `db/migrations/0016_card_pin_reset_event.sql` extends the event vocabulary.
 
-No other finding in this report has been acted on. The audit itself changed no
-business logic.
+### Group 1 — database authority (migration `0017_database_authority.sql`)
+
+| finding | what changed | proof |
+|---|---|---|
+| B-2 | `BEFORE TRUNCATE` statement triggers on 15 append-only relations (`prs.reject_truncate`) | `tests/integration/database-authority.test.ts` — 10 tables refuse `TRUNCATE`, populated tables refuse `UPDATE` and `DELETE` with `23001` |
+| B-3 | `prs.require_control_plane()` guards `system_settings` and `feature_flags`; a second guard protects `wallets.profile_id`; a third protects the derived `wallet_balance_cache` (`prs.refresh_wallet_balance` declares itself the writer) | same file — direct writes refused with `42501`, approved writes succeed, the cache still tracks the ledger |
+| B-1 (part 1) | `FORCE ROW LEVEL SECURITY` on all 46 tables that have RLS enabled | same file — zero tables remain enabled-but-unforced |
+| B-1 (part 2) | role `pars_service`: `NOLOGIN`, `NOBYPASSRLS`, DML-only grants, no `TRUNCATE`, membership in the four policy roles for `SET LOCAL ROLE` | grants applied and asserted through `setIdentity` in the same test file |
+| B-6 | the max-supply statement now binds `$1` | `tests/integration/dual-approval.test.ts` — 4/4, including the live-restored ceiling |
+
+Test suite at this point: **37 passed** (`ledger-invariants` 8, `send-path` 4,
+`database-authority` 21, `dual-approval` 4); `tsc --noEmit` clean; the running
+server re-verified end to end (console 200s, member authorization, debits =
+credits 3023, findings 0).
+
+**What group 1 still owes:** the request path does not yet call `setIdentity`
+inside each request transaction, so the policies — though now forced and bound to
+a service role — are not yet applied to live traffic. That change touches every
+query in the application (services use `db.query` outside transactions as well as
+inside them) and would break the anonymous login path, which has no identity by
+design and must keep running with privileged access. It is the next change set,
+with its own enforcement test: *a member session must not see a foreign wallet
+even when the service layer forgets its `WHERE` clause*.
+
+No other finding in this report has been acted on. Everything else in the audit
+still stands as written.

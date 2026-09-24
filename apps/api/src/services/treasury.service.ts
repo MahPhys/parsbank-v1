@@ -16,6 +16,7 @@ import {
   coverageHeadroom,
   redemptionSettlementUsdMinor,
 } from '@parsbank/domain';
+import { claimControlPlane } from '../db/control-plane.ts';
 import type { Database, TransactionContext } from '../db/types.ts';
 import { burnReference, issuanceReference, redemptionReference } from '../lib/ids.ts';
 import { registerApprovalExecutor } from './approval-registry.ts';
@@ -604,7 +605,12 @@ registerApprovalExecutor('MAX_SUPPLY_CHANGE', async (tx, { action, actor, meta }
     });
   }
 
-  await tx.execute(`UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = 'max_supply_minor'`, [
+  await claimControlPlane(tx);
+  // Parameters must be numbered contiguously from $1: this statement previously used
+  // only $2 and $3, so PostgreSQL could not infer $1 and the whole execution failed
+  // with 42P18 — the max-supply change could never actually be applied.
+  await tx.execute(`UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1`, [
+    'max_supply_minor',
     String(newMax),
     actor.profileId,
   ]);
@@ -634,6 +640,7 @@ registerApprovalExecutor('RESERVE_RULE_CHANGE', async (tx, { action, actor, meta
     throw new DomainError('VALIDATION_FAILED', { messageEn: `${key} is not a reserve rule` });
   }
   const value = action.payload.value;
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     key,
     JSON.stringify(value),
@@ -661,6 +668,7 @@ registerApprovalExecutor('REDEMPTION_RULE_CHANGE', async (tx, { action, actor, m
   if (!allowed.has(key)) {
     throw new DomainError('VALIDATION_FAILED', { messageEn: `${key} is not a redemption rule` });
   }
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     key,
     JSON.stringify(action.payload.value),
@@ -694,6 +702,7 @@ registerApprovalExecutor('DISABLE_FINANCIAL_CONTROLS', async (tx, { action, acto
   if (!allowed.has(key)) {
     throw new DomainError('VALIDATION_FAILED', { messageEn: `${key} is not a financial control` });
   }
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     key,
     JSON.stringify(enabled),
@@ -721,6 +730,7 @@ registerApprovalExecutor('SETTING_CHANGE_CRITICAL', async (tx, { action, actor, 
     [key],
   );
   if (!setting) throw new DomainError('VALIDATION_FAILED', { messageEn: `unknown setting ${key}` });
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     key,
     JSON.stringify(action.payload.value),
@@ -745,6 +755,7 @@ registerApprovalExecutor('SETTING_CHANGE_CRITICAL', async (tx, { action, actor, 
 registerApprovalExecutor('FEATURE_FLAG_CRITICAL', async (tx, { action, actor, meta }) => {
   const key = payloadString(action.payload, 'key')!;
   const enabled = Boolean(action.payload.enabled);
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.feature_flags SET enabled = $2, updated_by = $3 WHERE key = $1', [
     key,
     enabled,

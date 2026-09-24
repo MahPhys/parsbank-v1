@@ -6,6 +6,7 @@
  * dual-approval admin action. There is no code path that writes a critical setting
  * directly from an HTTP handler.
  */
+import { claimControlPlane } from '../db/control-plane.ts';
 import type { TransactionContext, Database } from '../db/types.ts';
 import { DomainError } from '@parsbank/domain';
 import type { ActorContext } from './context.ts';
@@ -134,6 +135,7 @@ export async function writeSetting(
       context: { key: input.key },
     });
   }
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     input.key,
     JSON.stringify(input.value),
@@ -153,6 +155,7 @@ export async function writeFeatureFlag(
   if (existing.requires_dual_approval) {
     throw new DomainError('DUAL_APPROVAL_REQUIRED', { context: { key: input.key } });
   }
+  await claimControlPlane(tx);
   await tx.execute(
     'UPDATE prs.feature_flags SET enabled = $2, rollout_percent = COALESCE($3, rollout_percent), updated_by = $4 WHERE key = $1',
     [input.key, input.enabled, input.rolloutPercent ?? null, input.actor.profileId],
@@ -168,6 +171,7 @@ export async function applyCriticalSettingChange(
   tx: TransactionContext,
   input: { key: string; value: unknown; actorProfileId: string },
 ): Promise<void> {
+  await claimControlPlane(tx);
   await tx.execute('UPDATE prs.system_settings SET value = $2, updated_by = $3 WHERE key = $1', [
     input.key,
     JSON.stringify(input.value),
